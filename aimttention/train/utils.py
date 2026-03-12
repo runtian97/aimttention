@@ -1,7 +1,6 @@
 import logging
-import os
 import re
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
 import omegaconf
 from omegaconf import OmegaConf
@@ -10,36 +9,18 @@ from torch import nn, Tensor
 from ignite import distributed as idist
 from ignite.engine import Engine, Events
 from ignite.handlers import ModelCheckpoint, ProgressBar, TerminateOnNan, global_step_from_engine
-from aimnet.config import build_module, get_init_module, get_module, load_yaml
-from aimnet.data import SizeGroupedDataset
-from aimnet.modules import Forces
-
-
-def enable_tf32(enable=True):
-    if enable:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-    else:
-        torch.backends.cuda.matmul.allow_tf32 = False
-        torch.backends.cudnn.allow_tf32 = False
-
-
-def make_seed(all_reduce=True):
-    # create seed
-    seed = int.from_bytes(os.urandom(2), 'big')
-    if all_reduce and idist.get_world_size() > 1:
-        seed = idist.all_reduce(seed)
+from aimttention.config import build_module, get_init_module, get_module, load_yaml
+from aimttention.data import SizeGroupedDataset
+from aimttention.modules import Forces
 
 
 def load_dataset(cfg: omegaconf.DictConfig, kind='train'):
-    # only load required subset of keys  
     keys = list(cfg.x) + list(cfg.y)
-    # in DDP setting, will only load 1/WORLD_SIZE of the data
     if idist.get_world_size() > 1 and not cfg.ddp_load_full_dataset:
         shard = (idist.get_local_rank(), idist.get_world_size())
     else:
         shard = None
-    
+
     extra_kwargs = {
             'keys': keys,
             'shard': shard,
@@ -83,7 +64,6 @@ def log_ds_group_sizes(ds):
 
 def get_loaders(cfg: omegaconf.DictConfig):
     ds_train: SizeGroupedDataset
-    # load datasets
     ds_train = load_dataset(cfg, kind='train')
     logging.info(f'Loaded train dataset from {cfg.train} with {len(ds_train)} samples.')
     log_ds_group_sizes(ds_train)
@@ -97,9 +77,8 @@ def get_loaders(cfg: omegaconf.DictConfig):
         else:
             ds_val = ds_train.random_split(cfg.val_fraction)[0]
             logging.info(f'Using a random fraction ({cfg.val_fraction*100:.1f}%, {len(ds_val)} samples) of train dataset for validation.')
-    
-    # merge small groups
-    ds_train.merge_groups(min_size=8*cfg.samplers.train.kwargs.batch_size, 
+
+    ds_train.merge_groups(min_size=8*cfg.samplers.train.kwargs.batch_size,
         mode_atoms=cfg.samplers.train.kwargs.batch_mode=='atoms')
     logging.info(f'After merging small groups in train dataset')
     log_ds_group_sizes(ds_train)
@@ -148,6 +127,9 @@ def get_optimizer(model: nn.Module, cfg: omegaconf.DictConfig):
 
 def get_scheduler(optimizer: torch.optim.Optimizer, cfg: omegaconf.DictConfig):
     d = OmegaConf.to_container(cfg)
+    # pop extra fields not consumed by the scheduler class
+    d.pop('attach_to', None)
+    d.pop('terminate_on_low_lr', None)
     d['args'] = [optimizer]
     scheduler = build_module(d)
     return scheduler
@@ -190,40 +172,6 @@ def get_metrics(cfg: omegaconf.DictConfig):
     d = OmegaConf.to_container(cfg)
     metrics = build_module(d)
     return metrics
-
-
-def train_step(engine: Engine, batch: Sequence[torch.Tensor]) -> Union[Any, Tuple[torch.Tensor]]:
-    global model
-    global optimizer
-    global prepare_batch
-    global loss_fn
-    global device
-
-    model.train()
-    optimizer.zero_grad()
-    x, y = prepare_batch(batch, device=device, non_blocking=True)
-    y_pred = model(x)
-    loss = loss_fn(y_pred, y)['loss']
-    loss.backward()
-    optimizer.step()
-    
-    return loss.item()
-
-
-def val_step(engine: Engine, batch: Sequence[torch.Tensor]) -> Union[Any, Tuple[torch.Tensor]]:
-    global model
-    global optimizer
-    global prepare_batch
-    global loss_fn
-    global device
-
-    model.eval()
-    if not next(iter(batch[0].values())).numel():
-        return None
-    x, y = prepare_batch(batch, device=device, non_blocking=True)
-    with torch.no_grad():
-        y_pred = model(x)
-    return y_pred, y
 
 
 def prepare_batch(batch: Dict[str, Tensor], device='cuda', non_blocking=True) -> Dict[str, Tensor]:
@@ -280,36 +228,38 @@ def build_engine(model, optimizer, scheduler, loss_fn, metrics, cfg, loader_val)
 
     train_fn = get_module(cfg.trainer.trainer)
     trainer = train_fn(model, optimizer, loss_fn, device=device, non_blocking=True)
-    # check for NaNs after each epoch
     trainer.add_event_handler(Events.EPOCH_COMPLETED, TerminateOnNan())
-    # log LR
     def log_lr(engine):
         lr = optimizer.param_groups[0]['lr']
         logging.info(f'LR: {lr}')
     trainer.add_event_handler(Events.EPOCH_STARTED, log_lr)
-    # write TQDM progress
     if idist.get_local_rank() == 0:
         pbar = ProgressBar()
         pbar.attach(trainer, event_name=Events.ITERATION_COMPLETED(every=100))
 
-    # attach validator
     validate_fn = get_module(cfg.trainer.evaluator)
     validator = validate_fn(model, device=device, non_blocking=True)
-    metrics.attach(validator, 'multi')
+    metrics.attach(validator, '')
     trainer.add_event_handler(Events.EPOCH_COMPLETED(every=1), validator.run, data=loader_val)
 
-    # scheduler
     if scheduler is not None:
-        validator.add_event_handler(Events.COMPLETED, scheduler)
-        terminator = TerminateOnLowLR(optimizer, cfg.scheduler.terminate_on_low_lr)
-        trainer.add_event_handler(Events.EPOCH_STARTED, terminator)
+        attach_to = cfg.scheduler.get('attach_to', 'validator')
+        if attach_to == 'trainer':
+            trainer.add_event_handler(Events.EPOCH_STARTED, scheduler)
+        else:
+            validator.add_event_handler(Events.COMPLETED, scheduler)
+        terminate_on_low_lr = cfg.scheduler.get('terminate_on_low_lr', None)
+        if terminate_on_low_lr is not None:
+            terminator = TerminateOnLowLR(optimizer, terminate_on_low_lr)
+            trainer.add_event_handler(Events.EPOCH_STARTED, terminator)
 
-    # checkpoint after each epoch
     if cfg.checkpoint is not None and idist.get_local_rank() == 0:
         kwargs = OmegaConf.to_container(cfg.checkpoint.kwargs)
         kwargs['global_step_transform'] = global_step_from_engine(trainer)
         kwargs['dirname'] = cfg.checkpoint.dirname
         kwargs['filename_prefix'] = cfg.checkpoint.filename_prefix
+        kwargs['score_function'] = lambda engine: -engine.state.metrics['loss']
+        kwargs['score_name'] = 'neg_val_loss'
         checkpointer = ModelCheckpoint(**kwargs)
         validator.add_event_handler(Events.EPOCH_COMPLETED, checkpointer, {'model': unwrap_module(model)})
 
@@ -330,7 +280,7 @@ def setup_wandb(cfg, model_cfg, model, trainer, validator, optimizer):
 
     wandb_logger.attach_output_handler(
         trainer,
-        event_name=Events.ITERATION_COMPLETED(every=200),
+        event_name=Events.ITERATION_COMPLETED,
         output_transform=lambda loss: {"loss": loss},
         tag='train'
         )
@@ -341,7 +291,7 @@ def setup_wandb(cfg, model_cfg, model, trainer, validator, optimizer):
         metric_names="all",
         tag='val'
         )
-    
+
     class EpochLRLogger(OptimizerParamsHandler):
         def __call__(self, engine, logger, event_name):
             global_step = engine.state.iteration
@@ -356,7 +306,7 @@ def setup_wandb(cfg, model_cfg, model, trainer, validator, optimizer):
         log_handler=EpochLRLogger(optimizer),
         event_name=Events.EPOCH_STARTED
         )
-    
+
     score_function = lambda engine: 1.0 / engine.state.metrics['loss']
     model_checkpoint = ModelCheckpoint(
             wandb.run.dir, n_saved=1, filename_prefix='best',

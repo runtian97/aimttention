@@ -1,8 +1,8 @@
 import click
-import aimnet
-from aimnet.train.train import train
-from aimnet.train.pt2jpt import jitcompile
-from aimnet.train.calc_sae import calc_sae
+import aimttention
+from aimttention.train.train import train
+from aimttention.train.pt2jpt import jitcompile
+from aimttention.train.calc_sae import calc_sae
 
 
 @click.group()

@@ -1,19 +1,23 @@
-class: aimnet.models.aimnet2.AIMNet2
+class: aimttention.models.aimnet2.AIMNet2
 kwargs:
     nfeature: 16
     d2features: true
-    ncomb_v: 12
     hidden:
       - [512, 380]
       - [512, 380]
       - [512, 380, 380]
     aim_size: 256
+    attention_heads: 8
+    num_charge_channels: 2
+    attention_dropout: 0.0
+    n_angular_basis: 8
+    use_dihedral: true
     aev:
       rc_s: 5.0
       nshifts_s: 16
     outputs:
       energy_mlp:
-        class: aimnet.modules.Output
+        class: aimttention.modules.Output
         kwargs:
           n_in: 256
           n_out: 1
@@ -25,19 +29,19 @@ kwargs:
             hidden: [128, 128]
 
       atomic_shift:
-        class: aimnet.modules.AtomicShift
+        class: aimttention.modules.AtomicShift
         kwargs:
           key_in: 'energy'
           key_out: 'energy'
 
       atomic_sum:
-        class: aimnet.modules.AtomicSum
+        class: aimttention.modules.AtomicSum
         kwargs:
           key_in: 'energy'
           key_out: 'energy'
 
       lrcoulomb:
-        class: aimnet.modules.LRCoulomb
+        class: aimttention.modules.LRCoulomb
         kwargs:
           key_in: 'charges'
           key_out: 'energy'

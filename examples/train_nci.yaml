@@ -1,0 +1,165 @@
+# OMOL25 training config (1M+ structures)
+# Usage: aimttention train --config train_nci.yaml --model model_nci.yaml ...
+
+run_name: ???
+project_name: ???
+
+data:
+    train: ???
+    val: null
+    sae:
+        energy:
+            file: '???'
+            mode: linreg
+
+    val_fraction: 0.02
+    separate_val: true
+    ddp_load_full_dataset: false
+
+    x: [coord, numbers, charge, mult]
+    y: [energy, forces, charges, spin_charges]
+
+    datasets:
+        train:
+            class: aimttention.data.SizeGroupedDataset
+            kwargs: {}
+        val:
+            class: aimttention.data.SizeGroupedDataset
+            kwargs: {}
+
+    samplers:
+        train:
+            class: aimttention.data.SizeGroupedSampler
+            kwargs:
+                batch_size: 8192
+                batch_mode: atoms
+                shuffle: True
+                batches_per_epoch: 5000
+        val:
+            class: aimttention.data.SizeGroupedSampler
+            kwargs:
+                batch_size: 16384
+                batch_mode: atoms
+                shuffle: False
+                batches_per_epoch: -1
+
+    loaders:
+        train:
+            num_workers: 4
+            pin_memory: true
+        val:
+            num_workers: 4
+            pin_memory: true
+
+loss:
+  class: aimttention.train.loss.MTLoss
+  kwargs:
+    components:
+        energy:
+            fn: aimttention.train.loss.energy_loss_fn
+            weight: 0.7
+        forces:
+            fn: aimttention.train.loss.peratom_loss_fn
+            weight: 0.2
+            kwargs:
+                key_true: forces
+                key_pred: forces
+        charges:
+            fn: aimttention.train.loss.peratom_loss_fn
+            weight: 0.05
+            kwargs:
+                key_true: charges
+                key_pred: charges
+        spin_charges:
+            fn: aimttention.train.loss.peratom_loss_fn
+            weight: 0.05
+            kwargs:
+                key_true: spin_charges
+                key_pred: spin_charges
+
+optimizer:
+    force_no_train: []
+    force_train: []
+    class: torch.optim.RAdam
+    kwargs:
+        lr: 0.0004
+        weight_decay: 1e-8
+    param_groups:
+        embedding:
+            re: '.*afv\.weight$'
+            lr: 0.0002
+            weight_decay: 0.0
+        attention_0:
+            re: '.*attention_blocks\.0\.'
+            lr: 0.0003
+        attention_1:
+            re: '.*attention_blocks\.1\.'
+            lr: 0.0004
+        attention_2:
+            re: '.*attention_blocks\.2\.'
+            lr: 0.0005
+        charge_mlps:
+            re: '.*charge_mlps\.'
+            lr: 0.0003
+        aim_mlp:
+            re: '.*aim_mlp\.'
+            lr: 0.0004
+        energy_mlp:
+            re: '.*outputs\.energy_mlp\.'
+            lr: 0.0006
+        shifts:
+            re: '.*.atomic_shift.shifts.weight$'
+            lr: 0.0001
+            weight_decay: 0.0
+
+scheduler:
+    class: ignite.handlers.param_scheduler.ReduceLROnPlateauScheduler
+    kwargs:
+        metric_name: loss
+        factor: 0.75
+        patience: 10
+    attach_to: validator
+    terminate_on_low_lr: 1.0e-6
+
+trainer:
+    trainer: aimttention.train.utils.default_trainer
+    evaluator: aimttention.train.utils.default_evaluator
+    epochs: 500
+
+checkpoint:
+    dirname: checkpoints
+    filename_prefix: ${run_name}
+    kwargs:
+        n_saved: 5
+        require_empty: False
+
+wandb:
+    init:
+        name: ${run_name}
+        mode: online
+        entity: null
+        project: ${project_name}
+        notes: null
+    watch_model:
+        log: all
+        log_freq: 1000
+        log_graph: true
+
+metrics:
+    class: aimttention.train.metrics.RegMultiMetric
+    kwargs:
+        cfg:
+            energy:
+                abbr: E
+                scale: 23.06
+            charges:
+                abbr: q
+                peratom: True
+            forces:
+                abbr: F
+                peratom: True
+                mult: 3
+                scale: 23.06
+            spin_charges:
+                abbr: sq
+                peratom: True

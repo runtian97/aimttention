@@ -3,3 +3,8 @@
 .history
 __pycache__
 .vscode
+test_output/
+output/
+checkpoints/
+wandb/
+.DS_Store

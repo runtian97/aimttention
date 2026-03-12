@@ -1,5 +1,5 @@
 import click
-from aimnet.data import SizeGroupedDataset
+from aimttention.data import SizeGroupedDataset
 import numpy as np
 import logging
 
@@ -18,7 +18,7 @@ def calc_sae(ds, output, samples=100000):
         ds = ds.random_split(samples / len(ds))[0]
     logging.info(f'Using {len(ds)} samples to calculate SAE')
     sae = ds.apply_peratom_shift('energy', '_energy')
-    # remove up 2 percentiles from right and left
+    # remove 2 percentiles from right and left
     energy = ds.concatenate('_energy')
     pct1, pct2 = np.percentile(energy, [2, 98])
     for _n, g in ds.items():
@@ -28,22 +28,16 @@ def calc_sae(ds, output, samples=100000):
             ds._data.pop(_n)
         else:
             ds[_n] = g
-    # now re-compute SAE
+    # re-compute SAE
     sae = ds.apply_peratom_shift('energy', '_energy')
     # save
     with open(output, 'w') as f:
         for k, v in sae.items():
-            str = f'{k}: {v}\n'
-            f.write(f'{k}: {v}\n')
-            print(str, end='')
+            line = f'{k}: {v}\n'
+            f.write(line)
+            print(line, end='')
 
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     calc_sae()
-
-
-
-
-
-              

@@ -4,7 +4,7 @@ from torch import Tensor
 
 
 def set_nb_mode(data: Dict[str, Tensor]) -> Dict[str, Tensor]:
-    """Logic to guess and set the neighbor model."""
+    """Detect and set the neighbor mode from input data."""
     if "nbmat" in data:
         if data["nbmat"].ndim == 2:
             data["_nb_mode"] = torch.tensor(1)
@@ -13,7 +13,6 @@ def set_nb_mode(data: Dict[str, Tensor]) -> Dict[str, Tensor]:
         else:
             raise ValueError(f"Invalid neighbor matrix shape: {data['nbmat'].shape}")
     else:
-        #
         data["_nb_mode"] = torch.tensor(0)
     return data
 
@@ -83,6 +82,7 @@ def mask_ij_(x: Tensor, data: Dict[str, Tensor], mask_value: float = 0.0, inplac
         x = x.masked_fill(mask, mask_value)
     return x
 
+
 def mask_i_(x: Tensor, data: Dict[str, Tensor], mask_value: float = 0.0, inplace: bool = True) -> Tensor:
     nb_mode = get_nb_mode(data)
     if nb_mode == 0:
@@ -139,7 +139,7 @@ def mol_sum(x: Tensor, data: Dict[str, Tensor]) -> Tensor:
             2,
         ), "Invalid tensor shape for mol_sum, ndim should be 1 or 2"
         idx = data["mol_idx"]
-        # assuming mol_idx is sorted, replace with max if not
+        # assuming mol_idx is sorted
         out_size = idx[-1].item() + 1
         if x.ndim == 1:
             res = torch.zeros(out_size, device=x.device, dtype=x.dtype)

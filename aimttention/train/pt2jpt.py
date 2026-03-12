@@ -1,9 +1,8 @@
 import torch
-from torch import nn, Tensor
-from aimnet.config import build_module, load_yaml
-from typing import Optional, Dict, List
+from torch import nn
+from aimttention.config import build_module, load_yaml
+from typing import Optional, List
 import click
-import os
 
 
 def set_eval(model: nn.Module) -> torch.nn.Module:
@@ -12,27 +11,24 @@ def set_eval(model: nn.Module) -> torch.nn.Module:
     return model.eval()
 
 
-def add_cutoff(model: nn.Module, cutoff: Optional[float] = None, cutoff_lr : Optional[float] = float('inf')) -> nn.Module:
+def add_cutoff(model: nn.Module, cutoff: Optional[float] = None) -> nn.Module:
     if cutoff is None:
         cutoff = max(v.item() for k, v in model.state_dict().items() if k.endswith('aev.rc_s'))
     model.cutoff = cutoff
-    if cutoff_lr is not None:
-        model.cutoff_lr = cutoff_lr
+    return model
+
+
+def add_cutoff_lr(model: nn.Module, cutoff_lr: float = float('inf')) -> nn.Module:
+    model.cutoff_lr = cutoff_lr
     return model
 
 
 def add_sae_to_shifts(model: nn.Module, sae_file: str) -> nn.Module:
     sae = load_yaml(sae_file)
-    model.outputs.atomic_shift.double() 
+    model.outputs.atomic_shift.double()
     for k, v in sae.items():
         model.outputs.atomic_shift.shifts.weight[k] += v
     return model
-
-
-def fix_agh(state_dict: Dict[str, Tensor]) -> dict:
-    state_dict['conv_q.agh'] = state_dict['conv_q.agh'].permute(2, 1, 0).contiguous()
-    state_dict['conv_a.agh'] = state_dict['conv_a.agh'].permute(2, 1, 0).contiguous()
-    return state_dict
 
 
 def mask_not_implemented_species(model: nn.Module, species: List[int]) -> nn.Module:
@@ -42,30 +38,29 @@ def mask_not_implemented_species(model: nn.Module, species: List[int]) -> nn.Mod
             weight[i, :] = torch.nan
     return model
 
-_default_aimnet2_config = os.path.join(os.path.dirname(__file__), '..', 'models', 'aimnet2.yaml')
-
 @click.command(short_help='Compile PyTorch model to TorchScript.')
-@click.argument('pt', type=str) #, help='Path to the input PyTorch weights file.')
-@click.argument('jpt', type=str) #, help='Path to the output TorchScript file.')
-@click.option('--model', type=str, default=_default_aimnet2_config, help='Path to model definition YAML file')
+@click.argument('pt', type=str)
+@click.argument('jpt', type=str)
+@click.option('--model', type=str, required=True, help='Path to model definition YAML file.')
 @click.option('--sae', type=str, default=None, help='Path to the energy shift YAML file.')
 @click.option('--species', type=str, default=None, help='Comma-separated list of parametrized atomic numbers.')
-@click.option('--fix-agh', is_flag=True, help='Fix the agh weights in the PyTorch model.')
-@click.option('--no-lr', is_flag=True, help='Do not add LR cutoff for model')
-def jitcompile(model, pt, jpt, sae, species, fix_agh, no_lr):
+def jitcompile(model, pt, jpt, sae, species):
     """ Build model from YAML config, load weight from PT file and write JIT-compiled JPT file.
     Plus some modifications to work with aimnet2calc.
     """
-    model: nn.Module = build_module(model)
+    # Auto-detect num_species from SAE before building model
+    model_cfg = load_yaml(model)
+    if sae:
+        sae_data = load_yaml(sae)
+        num_species = max(sae_data.keys()) + 1
+        if 'kwargs' not in model_cfg:
+            model_cfg['kwargs'] = {}
+        model_cfg['kwargs']['num_species'] = num_species
+    model: nn.Module = build_module(model_cfg)
     model = set_eval(model)
-    if no_lr:
-        cutoff_lr = None
-    else:
-        cutoff_lr = float('inf')
-    model = add_cutoff(model, cutoff_lr=cutoff_lr)
+    model = add_cutoff(model)
+    model = add_cutoff_lr(model)
     sd = torch.load(pt, map_location='cpu')
-    if fix_agh:
-        sd = fix_agh(sd)
     print(model.load_state_dict(sd, strict=False))
     if sae:
         model = add_sae_to_shifts(model, sae)

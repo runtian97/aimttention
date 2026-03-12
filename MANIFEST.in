@@ -1,5 +1,5 @@
-include aimnet/d3bj_data.pt
-include aimnet/train/*.yaml
-include aimnet/train/*.yml
-include aimnet/models/*.yaml
-include aimnet/models/*.yml
+include aimttention/d3bj_data.pt
+include aimttention/train/*.yaml
+include aimttention/train/*.yml
+include aimttention/models/*.yaml
+include aimttention/models/*.yml

@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='aimnet2',
+    name='aimttention',
     version='0.0.1',
     author='Roman Zubatyuk',
     author_email='zubatyuk@gmail.com',
@@ -18,7 +18,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'aimnet=aimnet.cli:cli'
+            'aimttention=aimttention.cli:cli'
         ],
     },    
     classifiers=[

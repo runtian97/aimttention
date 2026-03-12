@@ -1,12 +1,9 @@
 import os
 from glob import glob
-from re import L
 from typing import Dict, List, Sequence, Tuple, Union
 
 import numpy as np
 from torch.utils.data.dataloader import DataLoader, default_collate
-import h5py
-from collections import defaultdict
 import h5py
 
 
@@ -62,12 +59,6 @@ class DataGroup:
     def copy(self):
         return self.__class__(dict(self._data))
 
-    def deepcopy(self):
-        return self.__class__(dict(self._data), copy=True)
-
-    def to_dict(self):
-        return self._data
-
     def items(self):
         return self._data.items()
 
@@ -79,9 +70,6 @@ class DataGroup:
 
     def pop(self, key):
         return self._data.pop(key)
-
-    def rename_key(self, old, new):
-        self[new] = self.pop(old)
 
     def sample(self, idx, keys=None):
         if keys is None:
