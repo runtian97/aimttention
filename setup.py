@@ -10,7 +10,7 @@ setup(
     include_package_data=True,
     install_requires=[
         'torch',
-        'ignite',
+        'pytorch-ignite',
         'omegaconf',
         'click',
         'h5py',

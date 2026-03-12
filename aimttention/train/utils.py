@@ -299,7 +299,7 @@ def setup_wandb(cfg, model_cfg, model, trainer, validator, optimizer):
                 '{}_{}'.format(self.param_name, i): float(g[self.param_name])
                 for i, g in enumerate(self.optimizer.param_groups)
             }
-            logger.log(params, step=global_step, sync=self.sync)
+            logger.log(params, step=global_step)
 
     wandb_logger.attach(
         trainer,
